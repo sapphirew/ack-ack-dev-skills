@@ -32,7 +32,92 @@ This guide helps you work with AWS Controllers for Kubernetes (ACK) - from setti
 
 ## Common Workflows
 
-### 1. Setting Up ACK Development Environment
+### 1. Starting a New ACK Controller from Scratch
+
+**When to use:** Creating a brand new ACK controller for an AWS service that doesn't have one yet.
+
+**Prerequisites:**
+- AWS service has a stable API (not in preview)
+- Service is available in AWS SDK for Go v2
+- You have access to the AWS service for testing
+- code-generator and runtime repos cloned and built
+
+**Steps:**
+
+1. **Create the controller repository structure:**
+   ```bash
+   # Use an existing controller as a template
+   git clone https://github.com/aws-controllers-k8s/s3-controller new-service-controller
+   cd new-service-controller
+   rm -rf .git
+   git init
+   ```
+
+2. **Create minimal generator.yaml:**
+   ```yaml
+   ignore:
+     resource_names: []  # Add resources you don't want to generate
+     field_paths: []
+   
+   resources:
+     YourResource:
+       fields:
+         ResourceID:
+           is_primary_key: true
+       tags:
+         ignore: false  # or true if handling tags manually
+   ```
+
+3. **Create metadata.yaml:**
+   Check AWS SDK service package name and create metadata with correct service info.
+
+4. **Generate initial code:**
+   ```bash
+   # Generate APIs
+   ../code-generator/bin/ack-generate apis <service> \
+     --generator-config-path generator.yaml \
+     --metadata-config-path metadata.yaml \
+     -o . \
+     --refresh-cache=false \
+     --template-dirs ../code-generator/templates
+   
+   # Generate controller
+   ../code-generator/bin/ack-generate controller <service> \
+     --generator-config-path generator.yaml \
+     --metadata-config-path metadata.yaml \
+     -o . \
+     --refresh-cache=false \
+     --template-dirs ../code-generator/templates \
+     --service-account-name ack-<service>-controller
+   
+   # Generate deepcopy
+   export PATH=$PATH:$(go env GOPATH)/bin
+   controller-gen object:headerFile="hack/boilerplate.go.txt" paths="./..."
+   
+   # Generate CRDs
+   controller-gen crd:crdVersions=v1 paths="./apis/..." output:crd:artifacts:config=config/crd/bases
+   ```
+
+5. **Fix imports:**
+   ```bash
+   go run golang.org/x/tools/cmd/goimports@latest -w pkg/
+   ```
+
+6. **Test build:**
+   ```bash
+   go build -o bin/controller ./cmd/controller
+   make test
+   ```
+
+**Common first-time issues:**
+- **Missing controller-gen**: Install with `../code-generator/scripts/install-controller-gen.sh`
+- **Import errors**: Run goimports after generation
+- **CRDs not updated**: Must run controller-gen separately for CRD generation
+- **Template not found**: Need both `--template-dirs ../code-generator/templates` and `--template-dirs templates` if you have custom hooks
+
+---
+
+### 2. Setting Up ACK Development Environment
 
 **When to use:** First time contributing to ACK or setting up a new machine.
 
@@ -94,7 +179,7 @@ make test
 
 ---
 
-### 2. Adding a New Field to a CRD
+### 3. Adding a New Field to a CRD
 
 **Example requests:**
 - "@wilder add DatabaseName field to RDS Instance CRD"
@@ -114,16 +199,45 @@ make test
    
    Check `generator.yaml` in your service controller for field overrides or custom mappings.
 
-2. **Run code generation:**
+2. **Run full code generation:**
    ```bash
    cd <service>-controller
-   make build-controller
+   
+   # 1. Generate API types
+   ../code-generator/bin/ack-generate apis <service> \
+     --generator-config-path generator.yaml \
+     --metadata-config-path metadata.yaml \
+     -o . \
+     --refresh-cache=false \
+     --template-dirs ../code-generator/templates
+   
+   # 2. Generate controller code
+   ../code-generator/bin/ack-generate controller <service> \
+     --generator-config-path generator.yaml \
+     --metadata-config-path metadata.yaml \
+     -o . \
+     --refresh-cache=false \
+     --template-dirs ../code-generator/templates \
+     --template-dirs templates \
+     --service-account-name ack-<service>-controller
+   
+   # 3. Generate deepcopy (required after API changes)
+   export PATH=$PATH:$(go env GOPATH)/bin
+   controller-gen object:headerFile="hack/boilerplate.go.txt" paths="./..."
+   
+   # 4. Generate CRDs (required for kubectl apply)
+   controller-gen crd:crdVersions=v1 paths="./apis/..." output:crd:artifacts:config=config/crd/bases
+   
+   # 5. Fix imports
+   go run golang.org/x/tools/cmd/goimports@latest -w pkg/
    ```
    
-   This regenerates:
-   - CRD definitions (`config/crd/`)
-   - Go types (`apis/`)
-   - SDK integration code
+   **Why each step:**
+   - `ack-generate apis` - Updates Go types in `apis/v1alpha1/`
+   - `ack-generate controller` - Updates SDK integration in `pkg/resource/`
+   - `controller-gen object` - Updates `zz_generated.deepcopy.go` for Kubernetes
+   - `controller-gen crd` - Updates CRD YAML files for kubectl
+   - `goimports` - Fixes import statements after generation
 
 3. **Check the generated code:**
    ```bash
@@ -156,6 +270,69 @@ make test
    make build-controller-image
    ```
 
+**Renaming Fields for Better UX:**
+
+AWS API field names often include redundant prefixes (e.g., `BackupVaultName`, `BackupVaultTags`). ACK allows renaming these to more idiomatic Kubernetes names.
+
+**When to rename:**
+- Field name includes the resource type (e.g., `BackupVaultName` → `Name`)
+- AWS uses different tag field names (e.g., `BackupVaultTags` → `Tags`)
+- Nested structures can be flattened (with limitations)
+
+**How to rename in generator.yaml:**
+
+```yaml
+resources:
+  BackupVault:
+    fields:
+      Name:
+        is_primary_key: true
+    renames:
+      operations:
+        CreateBackupVault:
+          input_fields:
+            BackupVaultName: Name
+            BackupVaultTags: Tags
+        DeleteBackupVault:
+          input_fields:
+            BackupVaultName: Name
+        DescribeBackupVault:
+          input_fields:
+            BackupVaultName: Name
+        GetBackupVault:
+          output_fields:
+            BackupVaultName: Name
+```
+
+**Important:** You must add renames for ALL operations that use the field (Create, Read, Update, Delete, List).
+
+**Result:**
+```yaml
+# Before
+spec:
+  backupVaultName: my-vault
+  backupVaultTags:
+    env: prod
+
+# After
+spec:
+  name: my-vault
+  tags:
+    env: prod
+```
+
+**Limitations:**
+- Can rename top-level fields easily
+- Can rename one level of nesting (e.g., `BackupPlan: Plan`)
+- Cannot fully flatten complex nested input types (e.g., `BackupPlanInput`)
+- Simple string parameters (like S3's `Bucket`) can be flattened completely
+
+**Testing renames:**
+1. Regenerate all code (APIs, controller, deepcopy, CRDs)
+2. Update any custom hook templates that reference the old field names
+3. Apply updated CRDs to cluster: `kubectl apply -f config/crd/bases/`
+4. Test create, update, and delete operations
+
 **Common patterns from team:**
 - **Read-only fields**: Mark with `+kubebuilder:validation:ReadOnly` in generator config
 - **Required fields**: Add validation in CRD or admission webhook
@@ -168,7 +345,7 @@ make test
 
 ---
 
-### 3. Implementing Cross-Resource References
+### 4. Implementing Cross-Resource References
 
 **Example requests:**
 - "@wilder add VPC reference to EC2 Instance"
@@ -234,7 +411,7 @@ make test
 
 ---
 
-### 4. Adopting Existing AWS Resources
+### 5. Adopting Existing AWS Resources
 
 **When to use:** User wants ACK to manage an existing AWS resource (not created by ACK).
 
@@ -305,7 +482,7 @@ make test
 
 ---
 
-### 5. Debugging Controller Issues
+### 6. Debugging Controller Issues
 
 **Example requests:**
 - "@wilder debug why my S3 bucket is stuck in Creating"
@@ -376,7 +553,7 @@ make test
 
 ---
 
-### 6. Running Tests
+### 7. Running Tests
 
 **When to use:** Before submitting PR, after making changes.
 
@@ -437,7 +614,67 @@ func TestResourceManager_sdkFind(t *testing.T) {
 
 ---
 
-### 7. Code Generation Deep Dive
+### 8. Custom Hooks and Templates
+
+**When to use:** AWS API behavior requires custom logic that generated code can't handle.
+
+**Example scenario:** AWS Backup's DescribeBackupVault returns `AccessDeniedException` (403) instead of `ResourceNotFoundException` (404) when a vault doesn't exist. This makes it impossible to distinguish between "vault doesn't exist" and "no permission to describe vault".
+
+**Solution: Custom hook template**
+
+1. **Create hook template directory:**
+   ```bash
+   mkdir -p templates/hooks/backup_vault
+   ```
+
+2. **Add template file:**
+   
+   `templates/hooks/backup_vault/sdk_read_one_post_request.go.tpl`
+   
+   ```go
+   if err != nil {
+       var awsErr smithy.APIError
+       if errors.As(err, &awsErr) {
+           if awsErr.ErrorCode() == "AccessDeniedException" {
+               // Custom logic to check if resource exists
+               // Return ackerr.NotFound if it doesn't exist
+           }
+       }
+   }
+   ```
+
+3. **Reference in generator.yaml:**
+   ```yaml
+   resources:
+     BackupVault:
+       hooks:
+         sdk_read_one_post_request:
+           template_path: hooks/backup_vault/sdk_read_one_post_request.go.tpl
+   ```
+
+4. **Regenerate with custom templates:**
+   ```bash
+   ../code-generator/bin/ack-generate controller <service> \
+     --template-dirs ../code-generator/templates \
+     --template-dirs templates \
+     ...
+   ```
+
+**Important:** When regenerating, you must include BOTH template directories:
+- `../code-generator/templates` (base templates)
+- `templates` (your custom templates)
+
+**Hook template must use renamed fields:** If you renamed fields in generator.yaml, update the hook template to use the new names (e.g., `r.ko.Spec.Name` not `r.ko.Spec.BackupVaultName`).
+
+**Common hook types:**
+- `sdk_read_one_post_request` - After reading resource from AWS
+- `sdk_create_pre_build_request` - Before creating resource
+- `sdk_update_pre_build_request` - Before updating resource
+- `sdk_delete_pre_build_request` - Before deleting resource
+
+---
+
+### 9. Code Generation Deep Dive
 
 **When to use:** Understanding how code generation works, customizing generation.
 
@@ -559,6 +796,47 @@ AWS API Model → ack-generate → Generated Code
 - Verify AWS service quotas
 - Check for AWS service issues
 - Review CloudTrail logs
+
+### CRD Field Validation Errors
+
+**Problem:** `kubectl apply` fails with "unknown field spec.name"
+
+**Cause:** CRDs in cluster have old schema, but you're using new field names.
+
+**Solution:**
+```bash
+# Regenerate CRDs
+controller-gen crd:crdVersions=v1 paths="./apis/..." output:crd:artifacts:config=config/crd/bases
+
+# Apply updated CRDs
+kubectl apply -f config/crd/bases/
+```
+
+### Delete Operation Fails
+
+**Problem:** Controller logs show "missing required field" on delete
+
+**Cause:** Delete operation not included in field renames.
+
+**Solution:** Add delete operation to renames in generator.yaml:
+```yaml
+renames:
+  operations:
+    DeleteBackupVault:
+      input_fields:
+        BackupVaultName: Name
+```
+
+### Deepcopy Errors After Field Rename
+
+**Problem:** Build fails with "field BackupVaultName not found"
+
+**Cause:** `zz_generated.deepcopy.go` not regenerated after field rename.
+
+**Solution:**
+```bash
+controller-gen object:headerFile="hack/boilerplate.go.txt" paths="./..."
+```
 
 ### Test Issues
 
