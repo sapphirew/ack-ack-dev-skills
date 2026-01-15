@@ -565,6 +565,8 @@ spec:
    ```
    
    Tests individual functions and logic.
+   Only needed when adding custom logic in `hooks.go`, `delta.go`, etc.
+   Generated code does not need unit tests - E2E tests provide coverage.
 
 2. **Integration tests** (mocked AWS):
    ```bash
@@ -581,6 +583,7 @@ spec:
    ```
    
    Tests against real AWS services. **Use test accounts only.**
+   These are mandatory for new controllers and resources.
 
 **Team testing patterns:**
 
@@ -763,8 +766,9 @@ When adding a new resource to an existing ACK controller, ensure the PR includes
 [ ] Code compiles: go build -o bin/controller ./cmd/controller
 [ ] CRD copied to helm/crds/
 [ ] Resource added to helm/values.yaml reconcile.resources
+[ ] Unit tests added for any custom logic and hooks
 [ ] E2E tests added with create/update/delete coverage
-[ ] Manual testing completed against real AWS
+[ ] Manual testing completed against real AWS resources
 ```
 
 ### Common Misses
