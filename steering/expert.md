@@ -735,6 +735,47 @@ AWS API Model → ack-generate → Generated Code
 
 ---
 
+## PR Checklist for New Resources
+
+When adding a new resource to an existing ACK controller, ensure the PR includes ALL of the following:
+
+### Required Files
+
+| File/Location | Purpose |
+|---------------|---------|
+| `generator.yaml` | Resource config (remove from ignore, add fields/renames/hooks) |
+| `apis/v1alpha1/` | Generated API types |
+| `pkg/resource/<resource>/` | Generated controller code |
+| `config/crd/bases/` | Generated CRD definitions |
+| `helm/crds/` | Copy of CRD for Helm chart |
+| `helm/values.yaml` | Add to `reconcile.resources` list |
+| `test/e2e/tests/test_<resource>.py` | E2E tests (create, update, delete) |
+| `test/e2e/resources/<resource>.yaml` | Test resource template |
+
+### Pre-Submit Checklist
+
+```
+[ ] Resource removed from `ignore.resource_names` in generator.yaml
+[ ] All CRUD operations configured (Create, Read, Update, Delete)
+[ ] Code generated: ack-generate apis + controller
+[ ] CRDs generated: controller-gen crd
+[ ] Deepcopy generated: controller-gen object
+[ ] Code compiles: go build -o bin/controller ./cmd/controller
+[ ] CRD copied to helm/crds/
+[ ] Resource added to helm/values.yaml reconcile.resources
+[ ] E2E tests added with create/update/delete coverage
+[ ] Manual testing completed against real AWS
+```
+
+### Common Misses
+
+- **Helm chart not updated** - CRD exists but not in `helm/crds/`, resource not in `values.yaml`
+- **E2E tests missing** - Code works but no automated test coverage
+- **Update test missing** - Create/delete tested but not update operations
+- **SDK version not bumped** - New API fields require newer SDK version in `go.mod`
+
+---
+
 ## Best Practices
 
 ### Development
