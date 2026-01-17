@@ -751,6 +751,116 @@ func TestResourceManager_sdkFind(t *testing.T) {
 - **AWS rate limits**: E2E tests hitting API limits, add delays or use mocks
 - **Python venv issues**: Make sure setuptools is installed for Python 3.13+
 
+**E2E Test File Structure:**
+
+When creating E2E tests for a new controller or resource:
+
+```
+test/e2e/
+├── __init__.py              # Service constants and load helper
+├── conftest.py              # pytest fixtures (boto3 client)
+├── requirements.txt         # acktest dependency
+├── bootstrap_resources.py   # Bootstrap resource loader
+├── service_bootstrap.py     # Bootstrap lifecycle
+├── service_cleanup.py       # Cleanup lifecycle
+├── replacement_values.py    # Test variable defaults
+├── .gitignore               # Ignore .venv, __pycache__, *.pkl
+├── resources/
+│   └── <resource>.yaml      # YAML fixtures with $VARIABLE placeholders
+└── tests/
+    ├── __init__.py
+    └── test_<resource>.py   # Test classes
+```
+
+**Key file templates:**
+
+`test/e2e/__init__.py`:
+```python
+import pytest
+from pathlib import Path
+from acktest.resources import load_resource_file
+
+SERVICE_NAME = "<service>"
+CRD_GROUP = "<service>.services.k8s.aws"
+CRD_VERSION = "v1alpha1"
+
+service_marker = pytest.mark.service(arg=SERVICE_NAME)
+bootstrap_directory = Path(__file__).parent
+resource_directory = Path(__file__).parent / "resources"
+
+def load_<service>_resource(resource_name: str, additional_replacements: dict = {}):
+    return load_resource_file(resource_directory, resource_name, additional_replacements=additional_replacements)
+```
+
+`test/e2e/conftest.py`:
+```python
+import boto3
+import pytest
+
+@pytest.fixture(scope="module")
+def <service>_client():
+    return boto3.client("<service>")
+```
+
+`test/e2e/requirements.txt`:
+```
+acktest @ git+https://github.com/aws-controllers-k8s/test-infra.git@<commit-hash>
+```
+
+**YAML fixture pattern** (`test/e2e/resources/<resource>.yaml`):
+```yaml
+apiVersion: <service>.services.k8s.aws/v1alpha1
+kind: <Resource>
+metadata:
+  name: $RESOURCE_NAME
+spec:
+  name: $RESOURCE_NAME
+  # other fields...
+```
+
+**Test pattern with AWS verification:**
+```python
+from acktest.resources import random_suffix_name
+from acktest.k8s import resource as k8s
+from acktest.k8s import condition
+import time
+
+def test_create_delete(self, <service>_client):
+    resource_name = random_suffix_name("ack-test", 24)
+    
+    replacements = REPLACEMENT_VALUES.copy()
+    replacements["RESOURCE_NAME"] = resource_name
+    
+    resource_data = load_<service>_resource("resource", additional_replacements=replacements)
+    
+    ref = k8s.CustomResourceReference(CRD_GROUP, CRD_VERSION, RESOURCE_PLURAL, resource_name, namespace="default")
+    k8s.create_custom_resource(ref, resource_data)
+    cr = k8s.wait_resource_consumed_by_controller(ref)
+    
+    assert cr is not None
+    time.sleep(CREATE_WAIT_AFTER_SECONDS)
+    assert k8s.wait_on_condition(ref, condition.CONDITION_TYPE_RESOURCE_SYNCED, "True", wait_periods=5)
+    
+    # Verify in AWS using boto3
+    aws_resource = <service>_client.describe_<resource>(Name=resource_name)
+    assert aws_resource is not None
+    
+    # Cleanup
+    _, deleted = k8s.delete_custom_resource(ref)
+    assert deleted
+```
+
+**Resource dependency cleanup order:**
+
+When testing resources with dependencies (e.g., BackupPlan depends on BackupVault), delete in reverse order:
+```python
+# Create: vault first, then plan
+# Delete: plan first, then vault
+_, deleted = k8s.delete_custom_resource(plan_ref)
+time.sleep(DELETE_WAIT_AFTER_SECONDS)
+_, deleted = k8s.delete_custom_resource(vault_ref)
+```
+
 ---
 
 ### 9. Custom Hooks and Templates
