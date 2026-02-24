@@ -262,33 +262,51 @@ The code-generator handles reference resolution automatically. The generated cod
 
 ---
 
-### 5. Custom Hooks and Templates
+### 5. Error Codes and Custom Hooks
 
-**When to use:** AWS API behavior requires custom logic that generated code can't handle.
+**Prefer `exceptions.errors` over custom hooks for error code mapping.**
 
-**Example:** AWS Backup's DescribeBackupVault returns `AccessDeniedException` (403) instead of `ResourceNotFoundException` (404) when a vault doesn't exist.
+Many AWS APIs return non-standard error codes for 404 (not found). Use `exceptions.errors.404.code` in generator.yaml to map these:
+
+```yaml
+resources:
+  BackupVault:
+    exceptions:
+      errors:
+        404:
+          code: AccessDeniedException  # DescribeBackupVault returns 403 for non-existent vaults
+  BackupPlan:
+    exceptions:
+      errors:
+        404:
+          code: ResourceNotFoundException
+```
+
+See [ECS controller generator.yaml](https://github.com/aws-controllers-k8s/ecs-controller/blob/main/generator.yaml) for more examples. The code generator uses this to produce the correct `ackerr.NotFound` mapping in `sdkFind`.
+
+**Custom hooks** are for cases where declarative config isn't enough (e.g., complex conditional logic, extra API calls).
 
 1. **Create hook template:**
-   `templates/hooks/backup_vault/sdk_read_one_post_request.go.tpl`
+   `templates/hooks/<resource>/sdk_<hook_point>.go.tpl`
 
 2. **Reference in generator.yaml:**
    ```yaml
    resources:
-     BackupVault:
+     BackupPlan:
        hooks:
-         sdk_read_one_post_request:
-           template_path: hooks/backup_vault/sdk_read_one_post_request.go.tpl
+         sdk_update_post_build_request:
+           template_path: hooks/backup_plan/sdk_update_post_build_request.go.tpl
    ```
 
 3. **Rebuild** (custom templates are picked up automatically by `make build-controller`)
 
 **Hook template must use renamed fields:** If you renamed fields in generator.yaml, use the new names (e.g., `r.ko.Spec.Name` not `r.ko.Spec.BackupVaultName`).
 
-**Common hook types:**
+**Common hook points:**
 - `sdk_read_one_post_request` - After reading resource from AWS
-- `sdk_create_pre_build_request` - Before creating resource
-- `sdk_update_pre_build_request` - Before updating resource
-- `sdk_delete_pre_build_request` - Before deleting resource
+- `sdk_create_pre_build_request` / `sdk_create_post_build_request` - Before/after building create input
+- `sdk_update_pre_build_request` / `sdk_update_post_build_request` - Before/after building update input
+- `sdk_delete_pre_build_request` - Before building delete input
 
 ---
 
@@ -486,6 +504,8 @@ When building a new ACK controller or adding multiple resources, PRs should be s
    - `.gitignore` (not generated — copy from another controller)
    - `README.md` updated with service name (follow existing controller format)
    - No resources yet
+
+   **Also required for new controllers:** Add the controller to [test-infra/prow/jobs/jobs_config.yaml](https://github.com/aws-controllers-k8s/test-infra/blob/main/prow/jobs/jobs_config.yaml) so Prow can run E2E tests. Cut a separate PR to the test-infra repo.
 
 2. **Resource PRs (one per resource)** - Each resource gets its own PR
    - Remove resource from `ignore.resource_names`
