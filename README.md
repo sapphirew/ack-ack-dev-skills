@@ -99,6 +99,10 @@ We incorporate learnings from controller development, customer feedback, and tea
 ```
 skills/ack-dev/                # Agent Skill directory
 ├── SKILL.md                   # Core instructions and common workflows
+├── scripts/
+│   ├── build-controller.sh    # Build controller with correct env vars
+│   ├── verify-build.sh        # Post-build sanity checks
+│   └── setup-e2e.sh           # E2E test environment setup
 └── references/
     ├── environment-setup.md   # Dev environment setup
     ├── code-generation.md     # Code-gen internals and wrapper handling

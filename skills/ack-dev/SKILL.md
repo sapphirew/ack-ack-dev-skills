@@ -315,3 +315,11 @@ For PR ordering when building new controllers, see [pr-workflow.md](references/p
 - [Contributing to Code-Generator](references/contributing-codegen.md) - Test patterns, fixtures, PR workflow for code-gen changes
 - [PR Workflow](references/pr-workflow.md) - PR ordering for new controllers, bootstrap PRs, resource PRs
 - [Troubleshooting](references/troubleshooting.md) - Common issues, debugging tips, resources and links
+
+## Scripts
+
+Run these from the service controller directory:
+
+- **`scripts/build-controller.sh <service> [sdk-version] [codegen-path]`** - Builds a controller with correct env vars. Auto-detects code-generator location. Builds `ack-generate` if needed.
+- **`scripts/verify-build.sh`** - Post-build check: compiles the controller, reports changed files by area, warns if Helm chart wasn't updated.
+- **`scripts/setup-e2e.sh`** - Creates Python venv, installs test dependencies and setuptools. Handles the Python 3.13+ gotcha.
