@@ -70,6 +70,19 @@ claude --plugin-dir /path/to/wilder
 
 Symlink or copy the `skills/ack-dev/` directory into your tool's skill location. The skill follows the open [Agent Skills](https://agentskills.io) standard.
 
+### Kiro CLI Agent (optional)
+
+For a pre-configured agent with tools pre-approved for ACK development:
+
+```bash
+# Global
+cp agents/wilder.json ~/.kiro/agents/
+
+# Then swap to it
+kiro-cli --agent wilder
+# Or from within a session: /agent swap
+```
+
 ## Usage
 
 Once installed, the skill activates automatically when your request matches ACK development tasks:
