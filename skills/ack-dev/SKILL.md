@@ -208,6 +208,8 @@ The code-generator handles reference resolution automatically. The generated cod
 
 **Team decision** (from tech lead a-hilaly): Return error on invalid reference, don't create resource.
 
+**Same-service references: do NOT set `service_name`.** When referencing a resource in the same controller (e.g., BackupPlan referencing BackupVault), omit `service_name`. Setting it (even correctly, e.g., `service_name: backup`) causes the generated code to produce an unresolved import alias (`backupapitypes`) and a compile error. Without `service_name`, code-gen correctly uses the local API types. Only set `service_name` for cross-service references (e.g., IAM Role, KMS Key).
+
 ---
 
 ## Error Codes and Custom Hooks
