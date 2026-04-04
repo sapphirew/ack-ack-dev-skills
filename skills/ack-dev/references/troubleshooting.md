@@ -94,7 +94,3 @@ Also: if you rename a field (e.g. `SelectionId` → `ID`), code-gen loses the ma
 ### Community
 - [GitHub Discussions](https://github.com/orgs/aws-controllers-k8s/discussions)
 - [Slack Channel](https://kubernetes.slack.com/archives/C01EWFWCM9X)
-
-### Key Team Members
-- **Tech Leads**: jaypipes, a-hilaly
-- **Principal Engineers**: RedbackThomson, michaelhtm
